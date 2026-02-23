@@ -1,8 +1,11 @@
 import os
+import io
 import json
+import re
 import tempfile
-import subprocess
 from urllib.parse import urlparse, parse_qs
+
+import yt_dlp
 
 
 def extract_video_id(url: str) -> str:
@@ -21,34 +24,28 @@ def extract_video_id(url: str) -> str:
 
 def fetch_youtube_transcript(url: str) -> str:
     """
-    Fetches the transcript for a given YouTube URL using yt-dlp.
-    yt-dlp has better anti-blocking support and works on cloud providers like Render.
+    Fetches the transcript for a given YouTube URL using yt-dlp Python API.
+    yt-dlp works on cloud providers like Render without proxy or cookies.
     """
     try:
         video_id = extract_video_id(url)
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            output_template = os.path.join(tmpdir, "%(id)s")
+            output_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
 
-            # yt-dlp command to download only subtitles (no video)
-            cmd = [
-                "yt-dlp",
-                "--skip-download",           # Don't download video
-                "--write-subs",              # Write subtitles
-                "--write-auto-subs",         # Also include auto-generated subs
-                "--sub-langs", "en.*,hi",    # English variants + Hindi
-                "--sub-format", "json3",     # JSON format for easy parsing
-                "--convert-subs", "json3",
-                "-o", output_template,
-                f"https://www.youtube.com/watch?v={video_id}",
-            ]
+            ydl_opts = {
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["en", "en-US", "en-GB", "en-IN", "hi"],
+                "subtitlesformat": "json3",
+                "outtmpl": output_template,
+                "quiet": True,
+                "no_warnings": True,
+            }
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
 
             # Find any subtitle file downloaded
             subtitle_files = [
@@ -56,19 +53,12 @@ def fetch_youtube_transcript(url: str) -> str:
                 if f.endswith(".json3")
             ]
 
+            # Fallback: try vtt if json3 not found
             if not subtitle_files:
-                # Fallback: try vtt format if json3 didn't work
-                cmd_vtt = [
-                    "yt-dlp",
-                    "--skip-download",
-                    "--write-subs",
-                    "--write-auto-subs",
-                    "--sub-langs", "en.*,hi",
-                    "--sub-format", "vtt",
-                    "-o", output_template,
-                    f"https://www.youtube.com/watch?v={video_id}",
-                ]
-                subprocess.run(cmd_vtt, capture_output=True, text=True, timeout=60)
+                vtt_opts = dict(ydl_opts)
+                vtt_opts["subtitlesformat"] = "vtt"
+                with yt_dlp.YoutubeDL(vtt_opts) as ydl:
+                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
                 subtitle_files = [
                     f for f in os.listdir(tmpdir)
                     if f.endswith(".vtt")
@@ -77,21 +67,16 @@ def fetch_youtube_transcript(url: str) -> str:
             if not subtitle_files:
                 raise Exception(
                     "No subtitles/transcripts found for this video. "
-                    "The video may not have captions available."
+                    "The video may not have captions enabled."
                 )
 
-            # Read the first subtitle file found
             subtitle_path = os.path.join(tmpdir, subtitle_files[0])
 
             if subtitle_path.endswith(".json3"):
-                text = _parse_json3_subtitles(subtitle_path)
+                return _parse_json3_subtitles(subtitle_path)
             else:
-                text = _parse_vtt_subtitles(subtitle_path)
+                return _parse_vtt_subtitles(subtitle_path)
 
-            return text
-
-    except subprocess.TimeoutExpired:
-        raise Exception("Timed out while fetching transcript from YouTube.")
     except Exception as e:
         raise Exception(f"Failed to fetch transcript: {str(e)}")
 
@@ -113,17 +98,13 @@ def _parse_json3_subtitles(filepath: str) -> str:
 
 def _parse_vtt_subtitles(filepath: str) -> str:
     """Parse VTT subtitle format into plain text."""
-    import re
-
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Remove WEBVTT header and timing lines
     lines = content.splitlines()
     texts = []
     for line in lines:
         line = line.strip()
-        # Skip empty lines, WEBVTT header, timing lines, and position tags
         if (
             not line
             or line.startswith("WEBVTT")
@@ -132,7 +113,6 @@ def _parse_vtt_subtitles(filepath: str) -> str:
             or re.match(r"^\d+$", line)
         ):
             continue
-        # Remove HTML tags
         clean = re.sub(r"<[^>]+>", "", line).strip()
         if clean:
             texts.append(clean)
