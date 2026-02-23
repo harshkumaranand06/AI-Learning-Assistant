@@ -32,35 +32,50 @@ export default function ChatPage() {
         try {
             const currentMessages = [...messages, userMsg];
 
-            // MOCK STREAMING FOR UI DESIGN
-            // const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
-            //   method: "POST",
-            //   headers: { "Content-Type": "application/json" },
-            //   body: JSON.stringify({ messages: currentMessages }),
-            // });
+            const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messages: currentMessages }),
+            });
 
-            // if (!response.ok) throw new Error("Network response was not ok");
+            if (!response.ok) throw new Error("Network response was not ok");
 
             setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
-            // Mock streaming logic for UI preview
-            const mockText = "Here is a detailed explanation of the concept you asked about, simulated for your new 4K UI design. Machine learning models use gradient descent to optimize parameters. This allows for rich pattern recognition. How else can I assist you today?";
-            let i = 0;
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
 
-            const streamTimer = setInterval(() => {
-                if (i < mockText.length) {
-                    const char = mockText[i];
-                    setMessages((prev) => {
-                        const next = [...prev];
-                        next[next.length - 1].content += char;
-                        return next;
-                    });
-                    i++;
-                } else {
-                    clearInterval(streamTimer);
-                    setLoading(false);
+            if (reader) {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split("\n");
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            const data = line.slice(6).trim();
+                            if (data === "[DONE]") {
+                                break;
+                            }
+                            try {
+                                const parsed = JSON.parse(data);
+                                if (parsed.content) {
+                                    setMessages((prev) => {
+                                        const next = [...prev];
+                                        next[next.length - 1].content += parsed.content;
+                                        return next;
+                                    });
+                                }
+                            } catch (e) {
+                                // Sometimes chunks break parsing if streaming incomplete json
+                                console.error("Error parsing stream chunk:", e);
+                            }
+                        }
+                    }
                 }
-            }, 30);
+            }
+            setLoading(false);
 
         } catch (error) {
             console.error("Streaming error:", error);
