@@ -1,7 +1,7 @@
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig, GenericProxyConfig
 from urllib.parse import urlparse, parse_qs
 import os
-import tempfile
 
 def extract_video_id(url: str) -> str:
     """Extracts the video ID from a YouTube URL."""
@@ -12,54 +12,67 @@ def extract_video_id(url: str) -> str:
         if parsed_url.hostname in ('youtube.com', 'www.youtube.com'):
             if parsed_url.path == '/watch':
                 return parse_qs(parsed_url.query)['v'][0]
-    except Exception as e:
+    except Exception:
         raise ValueError(f"Invalid YouTube URL: {url}")
     raise ValueError(f"Could not extract video ID from URL: {url}")
 
+def _get_api() -> YouTubeTranscriptApi:
+    """
+    Returns a YouTubeTranscriptApi instance, optionally configured with a proxy
+    to bypass cloud IP blocks (e.g. on Render).
+
+    Cookie auth is currently disabled in youtube-transcript-api v1.x.
+    A proxy is the recommended workaround for cloud provider IP bans.
+
+    Proxy options (set via environment variables):
+      - WEBSHARE_PROXY_USERNAME + WEBSHARE_PROXY_PASSWORD → uses WebshareProxyConfig
+      - YOUTUBE_PROXY_URL → uses GenericProxyConfig with the given URL
+      - Neither set → no proxy (works locally but may fail on Render)
+    """
+    webshare_user = os.getenv("WEBSHARE_PROXY_USERNAME")
+    webshare_pass = os.getenv("WEBSHARE_PROXY_PASSWORD")
+    generic_proxy = os.getenv("YOUTUBE_PROXY_URL")
+
+    if webshare_user and webshare_pass:
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=webshare_user,
+                proxy_password=webshare_pass,
+            )
+        )
+    elif generic_proxy:
+        return YouTubeTranscriptApi(
+            proxy_config=GenericProxyConfig(
+                http_url=generic_proxy,
+                https_url=generic_proxy,
+            )
+        )
+    else:
+        return YouTubeTranscriptApi()
+
+
 def fetch_youtube_transcript(url: str) -> str:
     """Fetches the transcript for a given YouTube URL as a single text block."""
-    temp_cookie_path = None
     try:
         video_id = extract_video_id(url)
-        
-        # Check if cookies are provided via environment variable
-        cookies_content = os.getenv("YOUTUBE_COOKIES")
-        kwargs = {}
-        
-        if cookies_content:
-            # Create a temporary file to hold the cookies
-            fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
-            with os.fdopen(fd, 'w') as f:
-                f.write(cookies_content)
-            kwargs['cookies'] = temp_cookie_path
-        elif os.path.exists(os.path.join(os.path.dirname(__file__), 'cookies.txt')):
-            # Fallback for local development if cookies.txt exists
-            kwargs['cookies'] = os.path.join(os.path.dirname(__file__), 'cookies.txt')
-            
-        # Determine available transcripts
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id, **kwargs)
-        
+        api = _get_api()
+
         # Attempt to get English or Hindi first
         try:
+            transcript_list = api.list(video_id)
             transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'en-IN', 'hi'])
         except Exception:
             # Fallback to the first available transcript
+            transcript_list = api.list(video_id)
             available_transcripts = list(transcript_list)
             if not available_transcripts:
                 raise Exception("No transcripts found for this video")
             transcript = available_transcripts[0]
 
         transcript_obj = transcript.fetch()
-        
+
         # Combine all transcript texts into one string
         full_text = " ".join([snippet.text for snippet in transcript_obj.snippets])
         return full_text
     except Exception as e:
         raise Exception(f"Failed to fetch transcript: {str(e)}")
-    finally:
-        # Clean up the temporary cookie file if it was created
-        if temp_cookie_path and os.path.exists(temp_cookie_path):
-            try:
-                os.remove(temp_cookie_path)
-            except OSError:
-                pass
