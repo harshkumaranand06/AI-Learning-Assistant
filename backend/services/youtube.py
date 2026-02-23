@@ -37,7 +37,7 @@ def fetch_youtube_transcript(url: str) -> str:
             kwargs['cookies'] = os.path.join(os.path.dirname(__file__), 'cookies.txt')
             
         # Determine available transcripts
-        transcript_list = YouTubeTranscriptApi().list(video_id, **kwargs)
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id, **kwargs)
         
         # Attempt to get English or Hindi first
         try:
