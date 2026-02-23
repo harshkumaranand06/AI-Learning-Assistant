@@ -1,5 +1,7 @@
 from youtube_transcript_api import YouTubeTranscriptApi
 from urllib.parse import urlparse, parse_qs
+import os
+import tempfile
 
 def extract_video_id(url: str) -> str:
     """Extracts the video ID from a YouTube URL."""
@@ -16,11 +18,26 @@ def extract_video_id(url: str) -> str:
 
 def fetch_youtube_transcript(url: str) -> str:
     """Fetches the transcript for a given YouTube URL as a single text block."""
+    temp_cookie_path = None
     try:
         video_id = extract_video_id(url)
         
+        # Check if cookies are provided via environment variable
+        cookies_content = os.getenv("YOUTUBE_COOKIES")
+        kwargs = {}
+        
+        if cookies_content:
+            # Create a temporary file to hold the cookies
+            fd, temp_cookie_path = tempfile.mkstemp(suffix=".txt")
+            with os.fdopen(fd, 'w') as f:
+                f.write(cookies_content)
+            kwargs['cookies'] = temp_cookie_path
+        elif os.path.exists(os.path.join(os.path.dirname(__file__), 'cookies.txt')):
+            # Fallback for local development if cookies.txt exists
+            kwargs['cookies'] = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+            
         # Determine available transcripts
-        transcript_list = YouTubeTranscriptApi().list(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id, **kwargs)
         
         # Attempt to get English or Hindi first
         try:
@@ -39,3 +56,10 @@ def fetch_youtube_transcript(url: str) -> str:
         return full_text
     except Exception as e:
         raise Exception(f"Failed to fetch transcript: {str(e)}")
+    finally:
+        # Clean up the temporary cookie file if it was created
+        if temp_cookie_path and os.path.exists(temp_cookie_path):
+            try:
+                os.remove(temp_cookie_path)
+            except OSError:
+                pass
