@@ -1,6 +1,6 @@
 # AI Learning Assistant 🧠
 
-A complete, production-ready AI Learning Assistant system that transforms YouTube videos and PDFs into interactive study materials. Built with Next.js 14, FastAPI, Supabase pgvector, and OpenAI.
+A complete, production-ready AI Learning Assistant system that transforms YouTube videos and PDFs into interactive study materials. Built with Next.js 14, FastAPI, Supabase pgvector, Groq (Llama), and Google Gemini.
 
 ## Features ✨
 
@@ -22,8 +22,8 @@ The system follows a clean separation of concerns:
    - Acts as the orchestration layer and entry point for the frontend.
    - Utilizes `PyMuPDF` and `youtube-transcript-api` for raw text extraction.
    - Triggers `tiktoken` to split text into overlapping chunks (700 tokens, 100 overlap).
-   - Generates embeddings via OpenAI (`text-embedding-3-small`) and stores them in Supabase.
-   - Exposes RESTful endpoints for generation (Structured JSON generation via `gpt-4o-mini`).
+   - Generates embeddings via Google Gemini (`models/gemini-embedding-001`) and stores them in Supabase.
+   - Exposes RESTful endpoints for generation (Structured JSON generation and Streaming Chat via Groq's `llama-3.3-70b-versatile`).
 
 3. **Database (Supabase PostgreSQL + pgvector)**
    - Manages relational metadata (documents, chat history).
@@ -45,11 +45,11 @@ python -m venv venv
 pip install -r requirements.txt
 cp .env.example .env
 ```
-Fill in the `.env` variables with your OpenAI Key, Supabase URL, and Supabase Anon Key.
+Fill in the `.env` variables with your Groq API Key, Gemini API Key, Supabase URL, and Supabase Anon Key.
 ```bash
-uvicorn main:app --reload
+uvicorn main:app --port 8080 --reload
 ```
-The backend will run on `http://localhost:8000`.
+The backend will run on `http://localhost:8080`.
 
 ### 3. Frontend Setup (Next.js)
 ```bash
