@@ -57,3 +57,25 @@ BEGIN
   LIMIT match_count;
 END;
 $$;
+-- Table to store user profiles and current credit balance
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT UNIQUE,
+    credits INTEGER DEFAULT 10 CHECK (credits >= 0),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Table to store cached generated content (flashcards and quizzes)
+CREATE TABLE IF NOT EXISTS public.generated_content (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID REFERENCES public.documents(id) ON DELETE CASCADE UNIQUE,
+    flashcards JSONB,
+    quiz JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Insert a default profile for testing if none exists
+-- Note: In a real app, this would be handled by auth triggers
+INSERT INTO public.profiles (email, credits)
+VALUES ('default@example.com', 10)
+ON CONFLICT (email) DO NOTHING;

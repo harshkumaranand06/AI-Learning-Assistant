@@ -3,8 +3,15 @@ from pydantic import BaseModel
 from typing import List, Optional
 import typing_extensions as typing
 import json
-from services.supabase_client import supabase_client
-from services.groq_client import groq_client, GROQ_MODEL
+from services.supabase_client import (
+    supabase_client, 
+    get_user_credits, 
+    deduct_credit, 
+    get_cached_content, 
+    cache_content
+)
+import services.gemini_client as gemini
+import services.groq_client as groq
 from models.schemas import Flashcard, MCQQuestion
 
 router = APIRouter()
@@ -12,76 +19,90 @@ router = APIRouter()
 class DocumentRequest(BaseModel):
     document_id: str
 
-class FlashcardType(typing.TypedDict):
-    question: str
-    answer: str
+@router.post("/all")
+async def generate_all(req: DocumentRequest):
+    try:
+        # 1. Check cache
+        cache = await get_cached_content(req.document_id)
+        if cache:
+            return {
+                "flashcards": cache["flashcards"],
+                "questions": cache["quiz"]
+            }
 
-class FlashcardsResponse(typing.TypedDict):
-    flashcards: list[FlashcardType]
+        # 2. Check and deduct credits
+        if not await deduct_credit():
+            raise HTTPException(status_code=402, detail="Insufficient credits.")
 
-class MCQType(typing.TypedDict):
-    question: str
-    options: list[str]
-    correct_answer: str
+        # 3. Get document context and source type
+        doc_res = supabase_client.table("documents").select("*").eq("id", req.document_id).single().execute()
+        if not doc_res.data:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        
+        source_type = doc_res.data["source_type"]
+        source_url = doc_res.data.get("source_url", "")
+        
+        chunks_res = supabase_client.table("document_chunks") \
+            .select("content") \
+            .eq("document_id", req.document_id) \
+            .execute()
+        
+        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:20]]) if chunks_res.data else ""
+        
+        # Fallback: If no transcript, build a smart topic-discovery prompt
+        if combined_text:
+            context_part = f"Context (video transcript):\n{combined_text[:15000]}"
+        else:
+            context_part = f"""
+            YouTube Video URL: {source_url}
 
-class MCQResponse(typing.TypedDict):
-    questions: list[MCQType]
+            The transcript is unavailable. Based on your knowledge:
+            - Look up or infer the title and subject matter of this specific YouTube video
+            - Identify the CORE EDUCATIONAL TOPIC it teaches (e.g., Python loops, World War 2, photosynthesis, etc.)
+            - Focus entirely on the SUBJECT MATTER, NOT on descriptions like "the video explains..." or "the motive of this video"
+            - Generate the flashcards and quiz as if you are a teacher who watched the video and is quizzing students on its content
+            """
+
+        prompt = f"""
+        Generate BOTH 10-12 key flashcards AND a 5-8 question multiple-choice quiz on the educational topic from the source below.
+        
+        Rules:
+        - FLASHCARDS: each must have 'question' and 'answer' about factual content, definitions, or concepts
+        - QUIZ: each must have 'question', 4 'options', and 'correct_answer' (must exactly match one of the options)
+        - Focus only on teaching the CORE SUBJECT MATTER — not describing the video itself
+        - Write everything in English
+        - Output valid JSON with exactly two keys: "flashcards" and "questions"
+        
+        {context_part}
+        """
+
+        # 4. Call AI service — Groq for both YouTube and PDF (Gemini quota exhausted)
+        raw_response = await groq.generate_study_material(prompt)
+        
+        data = json.loads(raw_response)
+        flashcards = data.get("flashcards", [])
+        quiz = data.get("questions", [])
+
+        # 5. Cache result
+        await cache_content(req.document_id, flashcards, quiz)
+
+        return {
+            "flashcards": flashcards,
+            "questions": quiz
+        }
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/flashcards", response_model=List[Flashcard])
 async def generate_flashcards(req: DocumentRequest):
-    try:
-        # --- Real Groq implementation ---
-        res = supabase_client.table("document_chunks") \
-            .select("content") \
-            .eq("document_id", req.document_id) \
-            .execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document chunks not found.")
-        combined_text = "\n\n".join([item["content"] for item in res.data[:20]])
-        prompt = f"""
-        Based on the following document context, generate 10-15 highly effective flashcards to study the material.
-        Each flashcard must have a 'question' and an 'answer'.
-        IMPORTANT: Always write all questions and answers in English.
-        Provide the output in JSON format with a single key "flashcards" containing an array of objects.
-        Context: {combined_text[:15000]}
-        """
-        response = await groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.7
-        )
-        data = json.loads(response.choices[0].message.content)
-        return data.get("flashcards", [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Use the unified logic but return only flashcards for compatibility
+    res = await generate_all(req)
+    return res["flashcards"]
 
 @router.post("/quiz", response_model=List[MCQQuestion])
 async def generate_quiz(req: DocumentRequest):
-    try:
-        # --- Real Groq implementation ---
-        res = supabase_client.table("document_chunks") \
-            .select("content") \
-            .eq("document_id", req.document_id) \
-            .execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document chunks not found.")
-        combined_text = "\n\n".join([item["content"] for item in res.data[:20]])
-        prompt = f"""
-        Based on the following document context, generate a 7-10 question multiple-choice quiz.
-        Each question must have a 'question', 4 'options', and the 'correct_answer' (which must be exactly one of the options).
-        IMPORTANT: Always write all questions and answers in English.
-        Provide the output in JSON format with a single key "questions" containing an array of objects.
-        Context: {combined_text[:15000]}
-        """
-        response = await groq_client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.7
-        )
-        data = json.loads(response.choices[0].message.content)
-        return data.get("questions", [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    # Use the unified logic but return only quiz for compatibility
+    res = await generate_all(req)
+    return res["questions"]

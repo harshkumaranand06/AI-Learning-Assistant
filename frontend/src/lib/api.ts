@@ -47,3 +47,12 @@ export async function generateQuiz(documentId: string) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+export async function generateAll(documentId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/generate/all`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document_id: documentId })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
