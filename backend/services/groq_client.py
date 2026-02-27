@@ -7,12 +7,15 @@ if not settings.GROQ_API_KEY:
 groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-async def generate_study_material(prompt: str) -> str:
+async def generate_study_material(prompt: str, response_format: dict | None = {"type": "json_object"}) -> str:
     """Generates study material (flashcards/quiz) using Groq (Llama)."""
-    response = await groq_client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.7
-    )
+    kwargs = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7
+    }
+    if response_format:
+        kwargs["response_format"] = response_format
+        
+    response = await groq_client.chat.completions.create(**kwargs)
     return response.choices[0].message.content

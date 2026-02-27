@@ -22,31 +22,35 @@ const ACCENT_COLORS = [
 
 export default function QuizPage() {
     const [questions, setQuestions] = useState<Question[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
     const [submitted, setSubmitted] = useState(false);
     const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
-    useEffect(() => {
-        const fetchQuiz = async () => {
-            const docId = localStorage.getItem("documentId");
-            if (!docId) {
-                setError("No document found. Please upload a file first.");
-                setLoading(false);
-                return;
-            }
-            try {
-                const data = await generateQuiz(docId);
-                setQuestions(data);
-            } catch (err: any) {
-                setError(err.message || "Failed to generate quiz.");
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchQuiz();
-    }, []);
+    const [difficulty, setDifficulty] = useState("medium");
+    const [started, setStarted] = useState(false);
+
+    const startQuiz = async () => {
+        const docId = localStorage.getItem("documentId");
+        if (!docId) {
+            setError("No document found. Please upload a file first.");
+            return;
+        }
+
+        setStarted(true);
+        setLoading(true);
+        setError("");
+
+        try {
+            const data = await generateQuiz(docId, difficulty);
+            setQuestions(data);
+        } catch (err: any) {
+            setError(err.message || "Failed to generate quiz.");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSelect = (qIndex: number, option: string) => {
         if (submitted) return;
@@ -56,6 +60,50 @@ export default function QuizPage() {
     const score = questions.filter((q, i) => selectedAnswers[i] === q.correct_answer).length;
     const answered = Object.keys(selectedAnswers).length;
     const percentage = submitted ? Math.round((score / questions.length) * 100) : 0;
+
+    /* ── Starter screen ── */
+    if (!started && !loading && !error) {
+        return (
+            <div style={pageStyle}>
+                <QuizGalaxy />
+                <div style={{ maxWidth: 640, margin: "100px auto", textAlign: "center", position: "relative", zIndex: 10, ...glassPanel, padding: "50px 40px" }}>
+                    <h1 style={{ ...headingStyle, fontSize: 36 }}>Ready to test your knowledge?</h1>
+                    <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, marginBottom: 40 }}>Select a difficulty level to generate a custom-tailored quiz from your document.</p>
+
+                    <div style={{ display: "flex", gap: 16, justifyContent: "center", marginBottom: 40, flexWrap: "wrap" }}>
+                        {[
+                            { id: "easy", label: "Easy", desc: "Basic recall & definitions" },
+                            { id: "medium", label: "Medium", desc: "Standard application" },
+                            { id: "hard", label: "Hard", desc: "Complex synthesis & analysis" }
+                        ].map((level) => (
+                            <button key={level.id} onClick={() => setDifficulty(level.id)}
+                                style={{
+                                    padding: "16px 24px", borderRadius: 16,
+                                    background: difficulty === level.id ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.03)",
+                                    border: `1px solid ${difficulty === level.id ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.1)"}`,
+                                    color: "#fff",
+                                    display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+                                    cursor: "pointer", transition: "all 0.2s",
+                                    boxShadow: difficulty === level.id ? "0 8px 24px rgba(99,102,241,0.2)" : "none",
+                                    flex: "1 1 calc(33.333% - 16px)", minWidth: 140
+                                }}>
+                                <span style={{ fontSize: 18, fontWeight: 700, textTransform: "capitalize", color: difficulty === level.id ? "#818cf8" : "#fff" }}>
+                                    {level.label}
+                                </span>
+                                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontWeight: 500 }}>
+                                    {level.desc}
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+
+                    <button onClick={startQuiz} style={{ ...submitBtn, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", padding: "16px 64px" }}>
+                        Generate Quiz ✨
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     /* ── Loading ── */
     if (loading) {
@@ -189,9 +237,18 @@ export default function QuizPage() {
                 {/* Header */}
                 <div style={{ textAlign: "center", marginBottom: 40 }}>
                     <h1 style={headingStyle}>Knowledge Check</h1>
-                    <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 15, marginBottom: 24 }}>
-                        Test what you've learned · {questions.length} questions
-                    </p>
+                    <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 24 }}>
+                        <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 14 }}>
+                            {questions.length} questions
+                        </span>
+                        <span style={{ color: "rgba(255,255,255,0.2)" }}>·</span>
+                        <span style={{
+                            color: difficulty === 'hard' ? '#f43f5e' : difficulty === 'easy' ? '#10b981' : '#f59e0b',
+                            fontSize: 14, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1
+                        }}>
+                            {difficulty}
+                        </span>
+                    </div>
                     {/* Progress bar */}
                     <div style={{ width: 300, margin: "0 auto 8px", background: "rgba(255,255,255,0.08)", borderRadius: 99, height: 6 }}>
                         <div style={{

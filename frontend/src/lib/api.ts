@@ -28,30 +28,30 @@ export async function uploadPDF(file: File) {
   return res.json();
 }
 
-export async function generateFlashcards(documentId: string) {
+export async function generateFlashcards(documentId: string, difficulty: string = "medium") {
   const res = await fetch(`${API_BASE_URL}/api/generate/flashcards`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ document_id: documentId })
+    body: JSON.stringify({ document_id: documentId, difficulty })
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export async function generateQuiz(documentId: string) {
+export async function generateQuiz(documentId: string, difficulty: string = "medium") {
   const res = await fetch(`${API_BASE_URL}/api/generate/quiz`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ document_id: documentId })
+    body: JSON.stringify({ document_id: documentId, difficulty })
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
-export async function generateAll(documentId: string) {
+export async function generateAll(documentId: string, difficulty: string = "medium") {
   const res = await fetch(`${API_BASE_URL}/api/generate/all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ document_id: documentId })
+    body: JSON.stringify({ document_id: documentId, difficulty })
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -61,6 +61,26 @@ export async function getUserCredits() {
   const res = await fetch(`${API_BASE_URL}/api/user/credits`, {
     method: 'GET',
     cache: 'no-store'
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function generateMindMap(documentId: string) {
+  const res = await fetch(`${API_BASE_URL}/api/generate/mindmap`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document_id: documentId })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function explainTopic(documentId: string, topic: string) {
+  const res = await fetch(`${API_BASE_URL}/api/generate/explain-topic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document_id: documentId, topic })
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

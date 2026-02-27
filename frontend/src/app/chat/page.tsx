@@ -10,6 +10,14 @@ export default function ChatPage() {
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
+
+    // Voice States
+    const [isListening, setIsListening] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [autoTTS, setAutoTTS] = useState(true);
+    const recognitionRef = useRef<any>(null);
+    const synthRef = useRef<SpeechSynthesis | null>(null);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const scrollToBottom = () => {
@@ -20,22 +28,97 @@ export default function ChatPage() {
         scrollToBottom();
     }, [messages]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!input.trim() || loading) return;
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            synthRef.current = window.speechSynthesis;
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+            if (SpeechRecognition) {
+                recognitionRef.current = new SpeechRecognition();
+                recognitionRef.current.continuous = false;
+                recognitionRef.current.interimResults = true;
 
-        const userMsg: Message = { role: "user", content: input };
-        setMessages((prev) => [...prev, userMsg]);
+                recognitionRef.current.onresult = (event: any) => {
+                    const transcript = Array.from(event.results)
+                        .map((result: any) => result[0].transcript)
+                        .join('');
+                    setInput(transcript);
+                };
+
+                recognitionRef.current.onerror = (event: any) => {
+                    console.error("Speech recognition error", event.error);
+                    setIsListening(false);
+                };
+
+                recognitionRef.current.onend = () => {
+                    setIsListening(false);
+                };
+            }
+        }
+    }, []);
+
+    const toggleListening = () => {
+        if (isListening) {
+            recognitionRef.current?.stop();
+            setIsListening(false);
+        } else {
+            setInput("");
+            try {
+                if (recognitionRef.current) {
+                    recognitionRef.current.start();
+                    setIsListening(true);
+                }
+            } catch (err) {
+                console.error("Speech recognition is already started", err);
+                setIsListening(true);
+            }
+        }
+    };
+
+    const speakResponse = (text: string) => {
+        if (!synthRef.current) return;
+        synthRef.current.cancel();
+        const cleanText = text.replace(/[*#_`]/g, '');
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 1.05;
+        utterance.onstart = () => setIsSpeaking(true);
+        utterance.onend = () => setIsSpeaking(false);
+        synthRef.current.speak(utterance);
+    };
+
+    const stopSpeaking = () => {
+        if (synthRef.current) {
+            synthRef.current.cancel();
+            setIsSpeaking(false);
+        }
+    };
+
+    useEffect(() => {
+        const initialMsg = sessionStorage.getItem("initialChatMessage");
+        if (initialMsg) {
+            sessionStorage.removeItem("initialChatMessage");
+            // Give a slight delay to let the initial state mount
+            setTimeout(() => {
+                sendMessage(initialMsg, [
+                    { role: "assistant" as const, content: "Hi! How can I help you understand your study material?" },
+                ]);
+            }, 500);
+        }
+    }, []);
+
+    const sendMessage = async (query: string, currentHistory: Message[]) => {
+        if (!query.trim()) return;
+
+        const userMsg: Message = { role: "user", content: query };
+        const updatedHistory = [...currentHistory, userMsg];
+        setMessages(updatedHistory);
         setInput("");
         setLoading(true);
 
         try {
-            const currentMessages = [...messages, userMsg];
-
             const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ messages: currentMessages }),
+                body: JSON.stringify({ messages: updatedHistory }),
             });
 
             if (!response.ok) throw new Error("Network response was not ok");
@@ -44,6 +127,7 @@ export default function ChatPage() {
 
             const reader = response.body?.getReader();
             const decoder = new TextDecoder();
+            let fullResponse = "";
 
             if (reader) {
                 while (true) {
@@ -56,11 +140,13 @@ export default function ChatPage() {
                         if (line.startsWith("data: ")) {
                             const data = line.slice(6).trim();
                             if (data === "[DONE]") {
+                                if (autoTTS && fullResponse) speakResponse(fullResponse);
                                 break;
                             }
                             try {
                                 const parsed = JSON.parse(data);
                                 if (parsed.content) {
+                                    fullResponse += parsed.content;
                                     setMessages((prev) => {
                                         const next = [...prev];
                                         next[next.length - 1].content += parsed.content;
@@ -68,7 +154,6 @@ export default function ChatPage() {
                                     });
                                 }
                             } catch (e) {
-                                // Sometimes chunks break parsing if streaming incomplete json
                                 console.error("Error parsing stream chunk:", e);
                             }
                         }
@@ -87,6 +172,12 @@ export default function ChatPage() {
         }
     };
 
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (loading) return;
+        sendMessage(input, messages);
+    };
+
     return (
         <div style={pageStyle}>
             <ChatGalaxy />
@@ -94,11 +185,21 @@ export default function ChatPage() {
             <div style={{ maxWidth: 900, height: "85vh", margin: "0 auto", position: "relative", zIndex: 10, display: "flex", flexDirection: "column" }}>
 
                 {/* Header */}
-                <div style={{ ...glassPanel, padding: "24px 32px", marginBottom: 24, textAlign: "center", borderBottom: "none" }}>
+                <div style={{ ...glassPanel, padding: "24px 32px", marginBottom: 24, textAlign: "center", borderBottom: "none", position: "relative" }}>
                     <h1 style={headingStyle}>Neural Network Chat</h1>
                     <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, letterSpacing: 1 }}>
                         RAG-powered Knowledge Retrieval
                     </p>
+                    {isSpeaking && (
+                        <button onClick={stopSpeaking} style={{
+                            position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)",
+                            background: "rgba(239, 68, 68, 0.2)", border: "1px solid rgba(239, 68, 68, 0.5)",
+                            color: "#fff", padding: "8px 16px", borderRadius: 99, fontSize: 14, fontWeight: "bold",
+                            cursor: "pointer", transition: "all 0.2s"
+                        }}>
+                            🛑 Stop Speaking
+                        </button>
+                    )}
                 </div>
 
                 {/* Chat Window */}
@@ -139,7 +240,37 @@ export default function ChatPage() {
 
                     {/* Input Area */}
                     <div style={{ padding: "24px 32px", borderTop: "1px solid rgba(255,255,255,0.08)", background: "rgba(0,0,0,0.2)" }}>
-                        <form onSubmit={handleSubmit} style={{ display: "flex", gap: 16 }}>
+                        <form onSubmit={handleSubmit} style={{ display: "flex", gap: 16, alignItems: 'center' }}>
+                            <button
+                                type="button"
+                                onClick={() => setAutoTTS(!autoTTS)}
+                                style={{
+                                    flexShrink: 0, width: 48, height: 48, borderRadius: "50%",
+                                    background: autoTTS ? "rgba(139, 92, 246, 0.2)" : "rgba(255,255,255,0.04)",
+                                    border: `1px solid ${autoTTS ? "rgba(139, 92, 246, 0.5)" : "rgba(255,255,255,0.1)"}`,
+                                    color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: "pointer", transition: "all 0.3s"
+                                }}
+                                title={autoTTS ? "Voice Output On" : "Voice Output Off"}
+                            >
+                                <span style={{ fontSize: 20 }}>{autoTTS ? "🔊" : "🔇"}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={toggleListening}
+                                style={{
+                                    flexShrink: 0, width: 48, height: 48, borderRadius: "50%",
+                                    border: "1px solid",
+                                    borderColor: isListening ? "rgba(239, 68, 68, 0.5)" : "rgba(255,255,255,0.1)",
+                                    background: isListening ? "rgba(239, 68, 68, 0.2)" : "rgba(255,255,255,0.04)",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    cursor: "pointer", transition: "all 0.3s",
+                                    animation: isListening ? "pulse-red 1.5s infinite" : "none"
+                                }}
+                                title={isListening ? "Stop Listening" : "Start Voice Typing"}
+                            >
+                                <span style={{ fontSize: 20 }}>{isListening ? "🔴" : "🎙️"}</span>
+                            </button>
                             <input
                                 type="text"
                                 value={input}
@@ -177,6 +308,7 @@ export default function ChatPage() {
         .hide-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
         .hide-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        @keyframes pulse-red { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } }
       `}</style>
         </div>
     );

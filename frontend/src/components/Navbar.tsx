@@ -29,6 +29,7 @@ export default function Navbar() {
                     <NavLink href="/upload">Upload</NavLink>
                     <NavLink href="/flashcards">Flashcards</NavLink>
                     <NavLink href="/quiz">Quiz</NavLink>
+                    <NavLink href="/mindmap">Mind Map ✨</NavLink>
                     <NavLink href="/chat" isButton>Chat AI</NavLink>
                 </div>
             </div>

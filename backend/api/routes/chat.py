@@ -36,12 +36,17 @@ async def chat_stream(req: ChatRequest):
             history.append({"role": role, "content": msg.content})
 
         # Build the final user message with context injected
-        final_user_message = f"""Use the context below to answer the question. Always respond in English.
+        final_user_message = f"""
+        INSTRUCTION: You are a helpful AI learning assistant. You MUST ALWAYS respond in strict English. 
+        Do NOT respond in any other language, even if the provided context or user question contains another language like Hindi.
+        
+        Use the context below to answer the question:
 
-Context:
-{context_text}
+        Context:
+        {context_text}
 
-Question: {user_query}"""
+        Question: {user_query}
+        """
 
         history.append({"role": "user", "content": final_user_message})
 
