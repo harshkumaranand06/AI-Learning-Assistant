@@ -27,7 +27,6 @@ export default function Navbar() {
                 </Link>
                 <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
                     <NavLink href="/upload">Upload</NavLink>
-                    <NavLink href="/summary">Summary</NavLink>
                     <NavLink href="/flashcards">Flashcards</NavLink>
                     <NavLink href="/quiz">Quiz</NavLink>
                     <NavLink href="/chat" isButton>Chat AI</NavLink>
