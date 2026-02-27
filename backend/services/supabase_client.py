@@ -26,12 +26,13 @@ async def get_cached_content(document_id: str):
     res = supabase_client.table("generated_content").select("*").eq("document_id", document_id).execute()
     return res.data[0] if res.data else None
 
-async def cache_content(document_id: str, flashcards: list, quiz: list):
-    """Stores generated flashcards and quiz in the cache."""
+async def cache_content(document_id: str, flashcards: list, quiz: list, summary: str = None):
+    """Stores generated flashcards, quiz, and summary in the cache."""
     # Delete existing record first to avoid unique constraint violations
     supabase_client.table("generated_content").delete().eq("document_id", document_id).execute()
     supabase_client.table("generated_content").insert({
         "document_id": document_id,
         "flashcards": flashcards,
-        "quiz": quiz
+        "quiz": quiz,
+        "summary": summary
     }).execute()

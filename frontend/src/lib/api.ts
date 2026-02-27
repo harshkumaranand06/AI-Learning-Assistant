@@ -56,3 +56,12 @@ export async function generateAll(documentId: string) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+export async function getUserCredits() {
+  const res = await fetch(`${API_BASE_URL}/api/user/credits`, {
+    method: 'GET',
+    cache: 'no-store'
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
