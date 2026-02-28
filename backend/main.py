@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
-from api.routes import upload, generate, chat, user
+from api.routes import upload, generate, chat, user, quiz_tracking, library, path
 
 app = FastAPI(
     title="AI Learning Assistant API",
@@ -23,6 +23,9 @@ app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 app.include_router(generate.router, prefix="/api/generate", tags=["Generate"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(user.router, prefix="/api/user", tags=["User"])
+app.include_router(quiz_tracking.router, prefix="/api/quiz", tags=["Quiz"])
+app.include_router(library.router, prefix="/api/library", tags=["Library"])
+app.include_router(path.router, prefix="/api/path", tags=["Learning Path"])
 
 @app.get("/health")
 def health_check():

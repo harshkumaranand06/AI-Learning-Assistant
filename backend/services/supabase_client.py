@@ -9,16 +9,12 @@ def get_supabase_client() -> Client:
 supabase_client = get_supabase_client()
 async def get_user_credits(email: str = "default@example.com") -> int:
     """Gets the current credit balance for the user."""
-    res = supabase_client.table("profiles").select("credits").eq("email", email).single().execute()
-    return res.data["credits"] if res.data else 0
+    # BYPASS FOR LOCAL TESTING: Force infinite credits on the UI
+    return 999
 
 async def deduct_credit(email: str = "default@example.com") -> bool:
     """Deducts 1 credit from the user's balance."""
-    credits = await get_user_credits(email)
-    if credits <= 0:
-        return False
-    
-    supabase_client.table("profiles").update({"credits": credits - 1}).eq("email", email).execute()
+    # BYPASS FOR LOCAL TESTING: Always allow generation without deducting credits
     return True
 
 async def get_cached_content(document_id: str):

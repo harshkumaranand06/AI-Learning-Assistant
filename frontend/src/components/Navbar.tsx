@@ -26,7 +26,11 @@ export default function Navbar() {
                     AI Learning Assistant
                 </Link>
                 <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
+                    <NavLink href="/dashboard">Dashboard</NavLink>
+                    <NavLink href="/path">Learning Path</NavLink>
+                    <NavLink href="/library">Library</NavLink>
                     <NavLink href="/upload">Upload</NavLink>
+                    <NavLink href="/notes">Notes</NavLink>
                     <NavLink href="/flashcards">Flashcards</NavLink>
                     <NavLink href="/quiz">Quiz</NavLink>
                     <NavLink href="/mindmap">Mind Map ✨</NavLink>

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { generateQuiz } from "@/lib/api";
+import { generateQuiz, submitQuizAttempt } from "@/lib/api";
 
 interface Question {
     question: string;
@@ -29,9 +29,32 @@ export default function QuizPage() {
     const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 
     const [difficulty, setDifficulty] = useState("medium");
+    const [isExamMode, setIsExamMode] = useState(false);
+    const [isAdaptive, setIsAdaptive] = useState(false);
+    const [timeLeft, setTimeLeft] = useState(30 * 60); // 30 minutes in seconds
     const [started, setStarted] = useState(false);
 
-    const startQuiz = async () => {
+    // Timer effect
+    useEffect(() => {
+        if (started && isExamMode && !submitted && !loading && !error) {
+            if (timeLeft <= 0) {
+                setSubmitted(true);
+                return;
+            }
+            const timer = setInterval(() => {
+                setTimeLeft((prev) => prev - 1);
+            }, 1000);
+            return () => clearInterval(timer);
+        }
+    }, [started, isExamMode, submitted, loading, error, timeLeft]);
+
+    const formatTime = (seconds: number) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    const startQuiz = async (retryStrategy = false) => {
         const docId = localStorage.getItem("documentId");
         if (!docId) {
             setError("No document found. Please upload a file first.");
@@ -40,22 +63,72 @@ export default function QuizPage() {
 
         setStarted(true);
         setLoading(true);
-        setError("");
+        if (!retryStrategy) setError(""); // Only clear error if it's the first try
 
         try {
-            const data = await generateQuiz(docId, difficulty);
+            const data = await generateQuiz(docId, difficulty, isAdaptive);
             setQuestions(data);
+            setError(""); // Clean up any lingering polling messages
         } catch (err: any) {
-            setError(err.message || "Failed to generate quiz.");
+            const msg = err.message || "Failed to generate quiz.";
+            if (msg.includes("still generating")) {
+                setError("⏳ Document is still being processed by the AI... Auto-retrying in 5 seconds.");
+                // Wait 5 seconds and poll again
+                setTimeout(() => {
+                    startQuiz(true);
+                }, 5000);
+            } else {
+                setError(msg);
+                setLoading(false); // Only kill loading on fatal errors
+            }
         } finally {
-            setLoading(false);
+            // We only stop the loading spinner if we successfully got questions, or hit a fatal error.
+            // If we are polling, we keep it spinning.
         }
     };
+
+    // Explicitly watch for questions to stop loading
+    useEffect(() => {
+        if (questions.length > 0) {
+            setLoading(false);
+        }
+    }, [questions]);
 
     const handleSelect = (qIndex: number, option: string) => {
         if (submitted) return;
         setSelectedAnswers((prev) => ({ ...prev, [qIndex]: option }));
     };
+
+    useEffect(() => {
+        if (submitted && started) {
+            const currentScore = questions.filter((q, i) => selectedAnswers[i] === q.correct_answer).length;
+            const currentPercentage = Math.round((currentScore / questions.length) * 100);
+
+            const wrongQs: Record<string, string> = {};
+            questions.forEach((q, i) => {
+                if (selectedAnswers[i] !== q.correct_answer) {
+                    wrongQs[`q_${i}`] = JSON.stringify({
+                        question: q.question,
+                        your_answer: selectedAnswers[i] || "None",
+                        correct_answer: q.correct_answer
+                    });
+                }
+            });
+
+            const docId = localStorage.getItem("documentId");
+            if (docId) {
+                submitQuizAttempt({
+                    document_id: docId,
+                    difficulty: difficulty,
+                    score: currentScore,
+                    total_questions: questions.length,
+                    percentage: currentPercentage,
+                    time_taken_seconds: (30 * 60) - timeLeft,
+                    wrong_answers: Object.keys(wrongQs).length > 0 ? wrongQs : null
+                }).catch(err => console.error("Failed to record quiz", err));
+            }
+        }
+    }, [submitted]);
 
     const score = questions.filter((q, i) => selectedAnswers[i] === q.correct_answer).length;
     const answered = Object.keys(selectedAnswers).length;
@@ -97,7 +170,48 @@ export default function QuizPage() {
                         ))}
                     </div>
 
-                    <button onClick={startQuiz} style={{ ...submitBtn, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", padding: "16px 64px" }}>
+                    {/* Exam Mode Toggle */}
+                    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 32, marginBottom: 40, flexWrap: "wrap" }}>
+
+                        {/* Exam Toggle */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{
+                                width: 50, height: 26, background: isExamMode ? "#8b5cf6" : "rgba(255,255,255,0.1)",
+                                borderRadius: 99, cursor: "pointer", position: "relative", transition: "all 0.3s"
+                            }} onClick={() => setIsExamMode(!isExamMode)}>
+                                <div style={{
+                                    width: 20, height: 20, background: "#fff", borderRadius: "50%",
+                                    position: "absolute", top: 3, left: isExamMode ? 27 : 3, transition: "all 0.3s",
+                                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+                                }} />
+                            </div>
+                            <div style={{ textAlign: "left" }}>
+                                <div style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>⏱️ Exam Mode</div>
+                                <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 12 }}>30-min timer • Auto-submit</div>
+                            </div>
+                        </div>
+
+                        {/* Adaptive Toggle */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{
+                                width: 50, height: 26, background: isAdaptive ? "#10b981" : "rgba(255,255,255,0.1)",
+                                borderRadius: 99, cursor: "pointer", position: "relative", transition: "all 0.3s",
+                                boxShadow: isAdaptive ? "0 0 15px rgba(16, 185, 129, 0.4)" : "none"
+                            }} onClick={() => setIsAdaptive(!isAdaptive)}>
+                                <div style={{
+                                    width: 20, height: 20, background: "#fff", borderRadius: "50%",
+                                    position: "absolute", top: 3, left: isAdaptive ? 27 : 3, transition: "all 0.3s",
+                                    boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
+                                }} />
+                            </div>
+                            <div style={{ textAlign: "left" }}>
+                                <div style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>🧠 Adaptive AI</div>
+                                <div style={{ color: "rgba(16,185,129,0.8)", fontSize: 12 }}>Target past weak areas</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onClick={() => startQuiz(false)} style={{ ...submitBtn, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", color: "#fff", padding: "16px 64px" }}>
                         Generate Quiz ✨
                     </button>
                 </div>
@@ -110,11 +224,13 @@ export default function QuizPage() {
         return (
             <div style={pageStyle}>
                 <QuizGalaxy />
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20, paddingTop: 120 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 24, paddingTop: 120, position: "relative", zIndex: 10 }}>
                     <div style={spinnerStyle} />
-                    <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 16, letterSpacing: 1 }}>
-                        Generating your quiz with AI…
-                    </p>
+                    <div style={{ background: "rgba(0,0,0,0.6)", padding: "24px", borderRadius: "20px", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(10px)", maxWidth: "500px" }}>
+                        <p style={{ color: error ? "#fbbf24" : "#fff", fontSize: 18, fontWeight: 600, letterSpacing: 0.5, lineHeight: "1.6", textAlign: "center", margin: 0 }}>
+                            {error || "Generating your quiz with AI…"}
+                        </p>
+                    </div>
                 </div>
             </div>
         );
@@ -174,9 +290,14 @@ export default function QuizPage() {
                                 <span style={{ fontSize: 32, fontWeight: 800, color: "#fff" }}>{percentage}%</span>
                             </div>
                         </div>
-                        <button onClick={() => { setSubmitted(false); setSelectedAnswers({}); }}
+                        <button onClick={() => {
+                            setSubmitted(false);
+                            setSelectedAnswers({});
+                            setStarted(false);
+                            setTimeLeft(30 * 60);
+                        }}
                             style={{ ...submitBtn, background: `linear-gradient(135deg, ${gradColor.from}, ${gradColor.to})` }}>
-                            Retake Quiz
+                            Return to Setup
                         </button>
                     </div>
 
@@ -235,7 +356,17 @@ export default function QuizPage() {
             <div style={{ maxWidth: 720, margin: "0 auto", position: "relative", zIndex: 10 }}>
 
                 {/* Header */}
-                <div style={{ textAlign: "center", marginBottom: 40 }}>
+                <div style={{ textAlign: "center", marginBottom: 40, position: "relative" }}>
+                    {isExamMode && (
+                        <div style={{
+                            position: "absolute", right: 0, top: 0, background: timeLeft < 300 ? "rgba(239, 68, 68, 0.2)" : "rgba(139, 92, 246, 0.2)",
+                            border: `1px solid ${timeLeft < 300 ? "#ef4444" : "#8b5cf6"}`, padding: "8px 16px", borderRadius: 12,
+                            color: timeLeft < 300 ? "#fca5a5" : "#ddd6fe", fontWeight: 700, display: "flex", alignItems: "center", gap: 8,
+                            animation: timeLeft < 60 ? "pulse 1s infinite" : "none"
+                        }}>
+                            ⏱️ {formatTime(timeLeft)}
+                        </div>
+                    )}
                     <h1 style={headingStyle}>Knowledge Check</h1>
                     <div style={{ display: "flex", gap: 12, justifyContent: "center", marginBottom: 24 }}>
                         <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 14 }}>
@@ -430,3 +561,15 @@ const submitBtn: React.CSSProperties = {
     fontSize: 16, fontWeight: 700, letterSpacing: 0.5,
     transition: "all 0.3s ease",
 };
+
+// Global styles for pulse
+if (typeof document !== 'undefined') {
+    const style = document.createElement('style');
+    style.innerHTML = `
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.05); }
+        }
+    `;
+    document.head.appendChild(style);
+}

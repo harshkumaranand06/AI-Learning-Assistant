@@ -10,6 +10,8 @@ export default function ChatPage() {
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
+    const [sessionId, setSessionId] = useState<string>("");
+    const [globalMode, setGlobalMode] = useState<boolean>(false);
 
     // Voice States
     const [isListening, setIsListening] = useState(false);
@@ -23,6 +25,35 @@ export default function ChatPage() {
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
+
+    useEffect(() => {
+        // Handle Session ID
+        let sid = localStorage.getItem("chatSessionId");
+        if (!sid) {
+            sid = crypto.randomUUID();
+            localStorage.setItem("chatSessionId", sid);
+        }
+        setSessionId(sid);
+
+        // Fetch History
+        const loadHistory = async () => {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/chat/history/${sid}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.messages && data.messages.length > 0) {
+                        setMessages(data.messages.map((m: any) => ({
+                            role: m.role,
+                            content: m.content
+                        })));
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load chat history", err);
+            }
+        };
+        loadHistory();
+    }, []);
 
     useEffect(() => {
         scrollToBottom();
@@ -105,23 +136,58 @@ export default function ChatPage() {
         }
     }, []);
 
-    const sendMessage = async (query: string, currentHistory: Message[]) => {
+    const sendMessage = async (query: string, currentHistory: Message[], retryStrategy = false) => {
         if (!query.trim()) return;
 
         const userMsg: Message = { role: "user", content: query };
         const updatedHistory = [...currentHistory, userMsg];
-        setMessages(updatedHistory);
-        setInput("");
-        setLoading(true);
+
+        // Only append the user string visually on the very first try, to avoid dupes during polling
+        if (!retryStrategy) {
+            setMessages(updatedHistory);
+            setInput("");
+            setLoading(true);
+        }
+
+        const currentDocId = globalMode ? null : localStorage.getItem("documentId");
+
+        // Save User Message to DB
+        try {
+            await fetch(`${API_BASE_URL}/api/chat/save`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    document_id: currentDocId,
+                    role: "user",
+                    content: query
+                })
+            });
+        } catch (e) {
+            console.error("Failed to save user message", e);
+        }
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ messages: updatedHistory }),
+                body: JSON.stringify({
+                    messages: updatedHistory,
+                    document_id: currentDocId
+                }),
             });
 
-            if (!response.ok) throw new Error("Network response was not ok");
+            if (!response.ok) {
+                const errText = await response.text();
+                let errMsg = errText;
+                try {
+                    const errJson = JSON.parse(errText);
+                    errMsg = errJson.detail || errText;
+                } catch (e) {
+                    // fallback to text
+                }
+                throw new Error(errMsg);
+            }
 
             setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
@@ -141,6 +207,19 @@ export default function ChatPage() {
                             const data = line.slice(6).trim();
                             if (data === "[DONE]") {
                                 if (autoTTS && fullResponse) speakResponse(fullResponse);
+
+                                // Save Assistant Message to DB
+                                fetch(`${API_BASE_URL}/api/chat/save`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                        session_id: sessionId,
+                                        document_id: currentDocId,
+                                        role: "assistant",
+                                        content: fullResponse
+                                    })
+                                }).catch(e => console.error("Failed to save AI msg", e));
+
                                 break;
                             }
                             try {
@@ -162,13 +241,36 @@ export default function ChatPage() {
             }
             setLoading(false);
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Streaming error:", error);
-            setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: "Sorry, I encountered an error while typing the response." },
-            ]);
-            setLoading(false);
+
+            const msg = error.message || "Error";
+            if (msg.includes("still generating")) {
+                // If it's already polling, we just update the text instead of pushing endless new assistant messages
+                setMessages((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last.role === "assistant" && last.content.includes("still being processed")) {
+                        return prev; // keep the existing polling message
+                    }
+                    return [
+                        ...prev,
+                        { role: "assistant", content: "⏳ *Document is still being processed by the AI... Auto-retrying in 5 seconds.*" },
+                    ];
+                });
+
+                setTimeout(() => {
+                    // remove the temporary wait message before cleanly retrying
+                    setMessages((prev) => prev.filter(m => !m.content.includes("still being processed")));
+                    sendMessage(query, currentHistory, true);
+                }, 5000);
+
+            } else {
+                setMessages((prev) => [
+                    ...prev,
+                    { role: "assistant", content: "Sorry, I encountered an error while typing the response." },
+                ]);
+                setLoading(false);
+            }
         }
     };
 
@@ -185,21 +287,38 @@ export default function ChatPage() {
             <div style={{ maxWidth: 900, height: "85vh", margin: "0 auto", position: "relative", zIndex: 10, display: "flex", flexDirection: "column" }}>
 
                 {/* Header */}
-                <div style={{ ...glassPanel, padding: "24px 32px", marginBottom: 24, textAlign: "center", borderBottom: "none", position: "relative" }}>
-                    <h1 style={headingStyle}>Neural Network Chat</h1>
-                    <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, letterSpacing: 1 }}>
-                        RAG-powered Knowledge Retrieval
-                    </p>
-                    {isSpeaking && (
-                        <button onClick={stopSpeaking} style={{
-                            position: "absolute", right: 24, top: "50%", transform: "translateY(-50%)",
-                            background: "rgba(239, 68, 68, 0.2)", border: "1px solid rgba(239, 68, 68, 0.5)",
-                            color: "#fff", padding: "8px 16px", borderRadius: 99, fontSize: 14, fontWeight: "bold",
-                            cursor: "pointer", transition: "all 0.2s"
-                        }}>
-                            🛑 Stop Speaking
+                <div style={{ ...glassPanel, padding: "24px 32px", marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "none", position: "relative" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <h1 style={{ ...headingStyle, margin: 0, fontSize: 32 }}>Neural Network Chat</h1>
+                        <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, letterSpacing: 1, margin: 0 }}>
+                            {globalMode ? "🌍 Global Library Knowledge" : "📄 Single Document Context"}
+                        </p>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                        {/* Global Toggle */}
+                        <button
+                            onClick={() => setGlobalMode(!globalMode)}
+                            style={{
+                                display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 99,
+                                background: globalMode ? "rgba(139, 92, 246, 0.2)" : "rgba(255,255,255,0.05)",
+                                border: `1px solid ${globalMode ? "rgba(139, 92, 246, 0.4)" : "rgba(255,255,255,0.1)"}`,
+                                color: globalMode ? "#a5b4fc" : "rgba(255,255,255,0.6)",
+                                cursor: "pointer", transition: "all 0.2s", fontSize: 13, fontWeight: 600
+                            }}>
+                            {globalMode ? "🌍 Global Mode: ON" : "📄 Global Mode: OFF"}
                         </button>
-                    )}
+
+                        {isSpeaking && (
+                            <button onClick={stopSpeaking} style={{
+                                background: "rgba(239, 68, 68, 0.2)", border: "1px solid rgba(239, 68, 68, 0.5)",
+                                color: "#fff", padding: "8px 16px", borderRadius: 99, fontSize: 13, fontWeight: "bold",
+                                cursor: "pointer", transition: "all 0.2s"
+                            }}>
+                                🛑 Stop Speaking
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Chat Window */}

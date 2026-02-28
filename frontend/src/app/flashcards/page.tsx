@@ -30,24 +30,42 @@ export default function FlashcardsPage() {
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const fetchCards = async () => {
+        const fetchCards = async (retryStrategy = false) => {
             const docId = localStorage.getItem("documentId");
             if (!docId) {
                 setError("No document found. Please upload a file first.");
                 setLoading(false);
                 return;
             }
+            if (!retryStrategy) setError("");
             try {
                 const data = await generateFlashcards(docId);
                 setCards(data);
+                setError(""); // Clear lingering poll messages
             } catch (err: any) {
-                setError(err.message || "Failed to generate flashcards.");
+                const msg = err.message || "Failed to generate flashcards.";
+                if (msg.includes("still generating")) {
+                    setError("⏳ Document is still being processed by the AI... Auto-retrying in 5 seconds.");
+                    setTimeout(() => {
+                        fetchCards(true);
+                    }, 5000);
+                } else {
+                    setError(msg);
+                    setLoading(false); // Only kill loading on fatal errors
+                }
             } finally {
-                setLoading(false);
+                // If cards are successfully fetched, another useEffect will disable loading
             }
         };
         fetchCards();
     }, []);
+
+    // Stop loading only when cards natively arrive
+    useEffect(() => {
+        if (cards.length > 0) {
+            setLoading(false);
+        }
+    }, [cards]);
 
     const toggleFlip = (index: number) =>
         setFlipped((prev) => ({ ...prev, [index]: !prev[index] }));
@@ -68,11 +86,13 @@ export default function FlashcardsPage() {
         return (
             <div style={pageStyle}>
                 <FlashcardGalaxy />
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20, paddingTop: 120 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 24, paddingTop: 120, position: "relative", zIndex: 10 }}>
                     <div style={spinnerStyle} />
-                    <p style={{ color: "rgba(255,255,255,0.7)", fontSize: 16, letterSpacing: 1 }}>
-                        Generating flashcards with AI…
-                    </p>
+                    <div style={{ background: "rgba(0,0,0,0.6)", padding: "24px", borderRadius: "20px", border: "1px solid rgba(255,255,255,0.1)", backdropFilter: "blur(10px)", maxWidth: "500px" }}>
+                        <p style={{ color: error ? "#fbbf24" : "#fff", fontSize: 18, fontWeight: 600, letterSpacing: 0.5, lineHeight: "1.6", textAlign: "center", margin: 0 }}>
+                            {error || "Generating flashcards with AI…"}
+                        </p>
+                    </div>
                 </div>
             </div>
         );

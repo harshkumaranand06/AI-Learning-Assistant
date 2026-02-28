@@ -1,66 +1,87 @@
-# AI Learning Assistant 🧠
+# AI Learning Assistant 🧠✨
 
-A complete, production-ready AI Learning Assistant system that transforms YouTube videos and PDFs into interactive study materials. Built with Next.js 14, FastAPI, Supabase pgvector, Groq (Llama), and Google Gemini.
+A production-ready, highly interactive EdTech platform that transforms any PDF or YouTube video into a personalized AI curriculum. 
+Built with Next.js, FastAPI, Supabase, Groq, and Gemini.
 
-## Features ✨
+---
 
-- **Upload Sources:** Extract text automatically from any YouTube URL (via transcripts) or PDF document.
-- **Smart Flashcards:** Generates 10-15 key question/answer flashcards from the material.
-- **Interactive Quizzes:** Dynamic multiple-choice quizzes with AI-generated options and scoring.
-- **RAG Chat:** Stream AI responses augmented with vector search across your document chunks.
+## 🚀 Features by Tier
 
-## Architecture Diagram Explanation 🏗️
+### Tier 1: Core Functionality (The Foundation)
+* **Smart Uploads:** Instantly parse and chunk text from PDFs or extract transcripts directly from any YouTube URL.
+* **Vector Embeddings (Gemini):** Text chunks are embedded via Google's Gemini-1.5 API and stored in a Supabase pgvector database for high-speed similarity search.
+* **Study Material Generation (Groq):** One-click generation of interactive Flashcards and dynamic Multiple-Choice Quizzes with difficulty scaling (Easy/Medium/Hard).
+* **Neural Network Chat:** A context-aware chat interface utilizing RAG (Retrieval-Augmented Generation) so the AI only answers based on the uploaded document.
 
-The system follows a clean separation of concerns:
+### Tier 2: The "Premium" Experience (UX & Interactivity)
+* **Voice Interactions:** 
+  * 🎙️ **Speech-to-Text:** Speak your questions into the chat using the native Web Speech API.
+  * 🔊 **Text-to-Speech:** The AI can optionally read its streaming responses out loud in real-time.
+* **AI Notes Improver:** Paste rough, unstructured thoughts, and Groq will dynamically restructure them, fix grammar, and output beautiful markdown.
+* **Exam Mode:** Add a strict 30-minute pulsing countdown timer to Quizzes. Auto-submits when time runs out.
+* **Interactive Mind Maps:** An auto-generating Knowledge Graph (built with React Flow). Double-click nodes to trigger AI slide-out explanations, or teleport directly to the RAG chat for deep-dives.
 
-1. **Frontend (Next.js 14 - App Router)**
-   - Delivers a highly responsive, TailwindCSS-powered user interface.
-   - Manages state using React Hooks and `localStorage` to pass `documentId` across sessions.
-   - Stream parser fetches SSE from the backend for real-time chat.
+### Tier 3: Architecture & Analytics
+* **Progress Dashboard:** A centralized tracking hub utilizing `recharts` to plot quiz scores over time, time spent studying, and aggregate analytics.
+* **The Library:** A global grid view of every uploaded document. Click to instantly resume previous sessions.
+* **Adaptive Learning AI:** The backend records exactly which quiz questions you answered incorrectly. The next time you generate a quiz for that topic, the Groq system prompt is dynamically overridden to heavily bias new questions toward your documented weak areas.
+* **Map-Reduce Instant Generation:** Large documents trigger an invisible background task that requests individual JSON summaries for every 700-word chunk concurrently, reduces them into a single "Master Summary", and pipes that into generation prompts for 1-second, hallucination-free output.
 
-2. **Backend (FastAPI)**
-   - Acts as the orchestration layer and entry point for the frontend.
-   - Utilizes `PyMuPDF` and `youtube-transcript-api` for raw text extraction.
-   - Triggers `tiktoken` to split text into overlapping chunks (700 tokens, 100 overlap).
-   - Generates embeddings via Google Gemini (`models/gemini-embedding-001`) and stores them in Supabase.
-   - Exposes RESTful endpoints for generation (Structured JSON generation and Streaming Chat via Groq's `llama-3.3-70b-versatile`).
+### Tier 4: The Ultimate AI Tutor
+* **Personalized Learning Paths:** Input a high-level goal (e.g., "Learn Machine Learning" for "30 days"). The AI acts as a curriculum architect, generating a strict daily JSON roadmap saved to the database. Users click to check off days, driving a live progress bar.
+* **Resumable Chat:** Session IDs are generated locally and pinned. All User and AI messages are intercepted mid-stream and saved to `chat_history`. Reloading the chat fetches the history.
+* **Global Multi-Document RAG:** A toggle switch in the Chat UI allows the user to drop the current `document_id` filter. The custom Supabase RPC function performs a cosine-similarity sweep across *every single chunk from every single document* the user has ever uploaded simultaneously to answer cross-disciplinary questions.
 
-3. **Database (Supabase PostgreSQL + pgvector)**
-   - Manages relational metadata (documents, chat history).
-   - Utilizes `pgvector` extension with HNSW indexing to store and quickly perform cosine similarity searches against embedded chunks via custom RPC functions.
+---
 
-## Setup Instructions 🚀
+## 🛠️ Tech Stack & Architecture
+
+### Frontend
+* **Next.js (App Router)** - React framework
+* **TypeScript** - Type safety
+* **Tailwind CSS / Inline Canvas** - Custom glassmorphism and animated particle backgrounds
+* **React Flow** - For interactive Mind Map rendering
+* **Recharts** - For Dashboard data visualization
+
+### Backend
+* **FastAPI (Python)** - High-performance async API server
+* **Supabase** - PostgreSQL database with `pgvector` extension & RPC functions
+* **Groq SDK** - For lightning-fast LLaMA-3 text generation (prompts, quizzes, JSON structuring)
+* **Gemini SDK** - Exclusively for dense `text-embedding-004` vector generation
+* **yt-dlp & youtube-transcript-api** - Video processing
+
+---
+
+## ⚙️ Local Development Setup
 
 ### 1. Database Setup (Supabase)
-Run the script `supabase/schema.sql` in your Supabase project's SQL Editor to set up tables, PGVector extension, indices, and RPC functions.
+Create a new Supabase project and run the provided SQL schemas to generate the tables required for Vector Search, Documents, Quiz Attempts, Learning Paths, and Chat History.
 
-### 2. Backend Setup (FastAPI)
+### 2. Environment Variables
+You will need API keys for Groq, Gemini, and Supabase.
+
+**Backend (`backend/.env`):**
+```env
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_KEY=your_supabase_anon_key
+GROQ_API_KEY=your_groq_api_key
+GEMINI_API_KEY=your_gemini_api_key
+CORS_ORIGINS=http://localhost:3000
+```
+
+### 3. Run the Backend
 ```bash
 cd backend
 python -m venv venv
-# Activate virtual environment:
-# Windows: .\venv\Scripts\activate
-# Mac/Linux: source venv/bin/activate
-
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-Fill in the `.env` variables with your Groq API Key, Gemini API Key, Supabase URL, and Supabase Anon Key.
-```bash
-uvicorn main:app --port 8080 --reload
-```
-The backend will run on `http://localhost:8080`.
 
-### 3. Frontend Setup (Next.js)
+### 4. Run the Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-The frontend will run on `http://localhost:3000`.
-
-## Deployment Instructions 🌍
-
-- **Backend:** Deploy the FastAPI app to services like Render, Heroku, or Railway. Ensure to set the environment variables exactly as in `.env`.
-- **Frontend:** Deploy Next.js to Vercel or Netlify. Set `NEXT_PUBLIC_API_URL` to your live backend domain.
-- **Database:** Supabase is fully managed. Keep your Production tokens secure.
+Navigate to `http://localhost:3000` to interact with the AI Learning Assistant!

@@ -19,3 +19,4 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
+    document_id: Optional[str] = None

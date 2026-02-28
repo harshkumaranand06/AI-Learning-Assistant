@@ -19,12 +19,13 @@ router = APIRouter()
 class DocumentRequest(BaseModel):
     document_id: str
     difficulty: Optional[str] = "medium"
+    is_adaptive: Optional[bool] = False
 
 @router.post("/all")
 async def generate_all(req: DocumentRequest):
     try:
-        # 1. Check cache (only for medium difficulty to avoid schema changes)
-        if req.difficulty == "medium":
+        # 1. Check cache (only for medium difficulty and non-adaptive to avoid schema changes)
+        if req.difficulty == "medium" and not req.is_adaptive:
             cache = await get_cached_content(req.document_id)
             if cache:
                 return {
@@ -43,27 +44,48 @@ async def generate_all(req: DocumentRequest):
         
         source_type = doc_res.data["source_type"]
         source_url = doc_res.data.get("source_url", "")
+        master_summary = doc_res.data.get("master_summary", "")
         
-        chunks_res = supabase_client.table("document_chunks") \
-            .select("content") \
-            .eq("document_id", req.document_id) \
-            .execute()
-        
-        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:20]]) if chunks_res.data else ""
-        
-        # Fallback: If no transcript, build a smart topic-discovery prompt
-        if combined_text:
-            context_part = f"Context (video transcript):\n{combined_text[:15000]}"
-        else:
-            context_part = f"""
-            YouTube Video URL: {source_url}
+        # Check for explicitly logged background task failures
+        if master_summary and master_summary.startswith("ERROR:"):
+            raise HTTPException(status_code=400, detail=f"Background Processing Failed: {master_summary}")
 
-            The transcript is unavailable. Based on your knowledge:
-            - Look up or infer the title and subject matter of this specific YouTube video
-            - Identify the CORE EDUCATIONAL TOPIC it teaches (e.g., Python loops, World War 2, photosynthesis, etc.)
-            - Focus entirely on the SUBJECT MATTER, NOT on descriptions like "the video explains..." or "the motive of this video"
-            - Generate the flashcards and quiz as if you are a teacher who watched the video and is quizzing students on its content
+        # Fast Path: If we have a Map-Reduced Master Summary, format it directly
+        if master_summary:
+            context_part = f"""
+            Pre-computed Document Master Summary & Knowledge Base:
+            {master_summary}
+            
+            Based ENTIRELY on the structured knowledge above, generate the requested quiz and flashcards.
             """
+        else:
+            # LEGACY FALLBACK: Pull chunks directly if summary is missing
+            chunks_res = supabase_client.table("document_chunks") \
+                .select("content") \
+                .eq("document_id", req.document_id) \
+                .limit(5) \
+                .execute()
+            
+            if chunks_res.data:
+                combined_text = "\n\n".join([c["content"] for c in chunks_res.data])
+                context_part = f"""
+                Document Content Excerpts:
+                {combined_text}
+                
+                Based on the excerpts above, generate the requested study material.
+                """
+            elif source_type == "youtube" and not source_url:
+                context_part = f"""
+                YouTube Video Transcript unavailable. Based on your knowledge:
+                - Look up or infer the title and subject matter of this specific YouTube video
+                - Identify the CORE EDUCATIONAL TOPIC it teaches
+                - Focus entirely on the SUBJECT MATTER
+                - Generate the flashcards and quiz
+                """
+            else:
+                raise HTTPException(status_code=400, detail="No content found for this document.")
+            
+
 
         difficulty_prompt = {
             "easy": "Write EASY questions. Focus on basic definitions, direct recall of facts, and fundamental concepts. Use simple language.",
@@ -71,11 +93,44 @@ async def generate_all(req: DocumentRequest):
             "hard": "Write HARD questions. Focus on complex synthesis, multi-step analysis, edge cases, and critical thinking. The distractors (wrong options) should be highly plausible."
         }.get(req.difficulty.lower(), "Write questions of STANDARD difficulty.")
 
+        adaptive_prompt = ""
+        if req.is_adaptive:
+            # Fetch the user's wrong answers from recent attempts for this document
+            attempts_res = supabase_client.table("quiz_attempts") \
+                .select("wrong_answers") \
+                .eq("document_id", req.document_id) \
+                .not_.is_('wrong_answers', 'null') \
+                .order("created_at", desc=True) \
+                .limit(3) \
+                .execute()
+            
+            wrong_qs = []
+            if attempts_res.data:
+                for attempt in attempts_res.data:
+                    for key, val_str in attempt["wrong_answers"].items():
+                        try:
+                            val = json.loads(val_str) if isinstance(val_str, str) else val_str
+                            wrong_qs.append(val.get("question", ""))
+                        except:
+                            pass
+            
+            if wrong_qs:
+                adaptive_prompt = f"""
+                ADAPTIVE LEARNING OVERRIDE:
+                The student previously got questions related to these topics WRONG:
+                {json.dumps(wrong_qs[:10], indent=2)}
+
+                CRITICAL INSTRUCTION: You MUST heavily bias the generated Flashcards and Quiz questions towards these specific weak areas. 
+                Ensure they review the core concepts needed to answer those specific questions correctly next time.
+                """
+
         prompt = f"""
         Generate BOTH 10-12 key flashcards AND a 5-8 question multiple-choice quiz on the educational topic from the source below.
         
         Difficulty Instruction:
         {difficulty_prompt}
+
+        {adaptive_prompt}
         
         Rules:
         - FLASHCARDS: each must have 'question' and 'answer' about factual content, definitions, or concepts
@@ -102,6 +157,8 @@ async def generate_all(req: DocumentRequest):
             "flashcards": flashcards,
             "questions": quiz
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(traceback.format_exc())
@@ -134,11 +191,11 @@ async def generate_mindmap(req: DocumentRequest):
             .eq("document_id", req.document_id) \
             .execute()
         
-        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:20]]) if chunks_res.data else ""
+        # HARD CAP limit to prevent massive payload tokens
+        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:5]]) if chunks_res.data else ""
         
         prompt = f"""
-        Generate a mind map based on the following content. 
-        Extract the central topic as the root node, and create a logical hierarchy of related sub-topics and details.
+        Extract the core concepts from the following text and return them strictly in JSON format to build a React Flow graph.
         
         Rules:
         - Output MUST be valid JSON with EXACTLY two keys: "nodes" and "edges"
@@ -148,7 +205,7 @@ async def generate_mindmap(req: DocumentRequest):
         - Create a rich, detailed hierarchy (aim for 10-20 nodes).
         
         Content:
-        {combined_text[:15000]}
+        {combined_text[:6000]}
         """
 
         raw_response = await groq.generate_study_material(prompt)
@@ -158,6 +215,8 @@ async def generate_mindmap(req: DocumentRequest):
             "nodes": data.get("nodes", []),
             "edges": data.get("edges", [])
         }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(traceback.format_exc())
@@ -182,7 +241,8 @@ async def explain_topic(req: TopicRequest):
             .eq("document_id", req.document_id) \
             .execute()
         
-        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:20]]) if chunks_res.data else ""
+        # HARD CAP limit to prevent massive payload tokens
+        combined_text = "\n\n".join([item["content"] for item in chunks_res.data[:5]]) if chunks_res.data else ""
         
         prompt = f"""
         Based on the following content, explain the subtopic "{req.topic}" in detail.
@@ -191,7 +251,7 @@ async def explain_topic(req: TopicRequest):
         IMPORTANT: You MUST respond entirely in English.
         
         Content:
-        {combined_text[:15000]}
+        {combined_text[:6000]}
         """
 
         raw_response = await groq.generate_study_material(prompt, response_format=None)
@@ -199,6 +259,44 @@ async def explain_topic(req: TopicRequest):
         return {
             "explanation": raw_response
         }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+class NotesRequest(BaseModel):
+    raw_notes: str
+
+@router.post("/improve-notes")
+async def improve_notes(req: NotesRequest):
+    try:
+        # Notes improvement doesn't strictly need a document_id as it works on raw text
+        if not await deduct_credit():
+            raise HTTPException(status_code=402, detail="Insufficient credits.")
+        
+        prompt = f"""
+        You are an expert AI Tutor and study assistant. Review the following raw study notes provided by the user.
+
+        Your task is to:
+        1. Fix any grammar and spelling mistakes.
+        2. Improve the formatting and structure (use headings, bullet points, bold text).
+        3. Inject missing core concepts or context that the user likely forgot, to make these notes "exam-ready".
+        4. Keep the output clean, highly readable, and structured in Markdown.
+        5. Respond ONLY with the newly improved notes content. Do not include introductory text like "Here are your improved notes:".
+        
+        Raw Notes:
+        {req.raw_notes}
+        """
+
+        raw_response = await groq.generate_study_material(prompt, response_format=None)
+        
+        return {
+            "improved_notes": raw_response
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(traceback.format_exc())

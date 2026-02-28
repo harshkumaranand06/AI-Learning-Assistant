@@ -7,6 +7,18 @@ CREATE TABLE IF NOT EXISTS public.documents (
     source_type VARCHAR(50) NOT NULL, -- 'pdf' or 'youtube'
     source_url TEXT, -- YouTube URL or filename
     title TEXT,
+    folder_name TEXT DEFAULT 'Uncategorized',
+    tags TEXT[] DEFAULT '{}',
+    master_summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Tier 4: Personalized Learning Paths
+CREATE TABLE IF NOT EXISTS public.learning_paths (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    goal TEXT NOT NULL,
+    timeframe_days INT NOT NULL,
+    roadmap JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -79,3 +91,16 @@ CREATE TABLE IF NOT EXISTS public.generated_content (
 INSERT INTO public.profiles (email, credits)
 VALUES ('default@example.com', 10)
 ON CONFLICT (email) DO NOTHING;
+
+-- Table to store user quiz attempts for adaptive learning and dashboards
+CREATE TABLE IF NOT EXISTS public.quiz_attempts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID REFERENCES public.documents(id) ON DELETE CASCADE,
+    difficulty TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    total_questions INTEGER NOT NULL,
+    percentage FLOAT NOT NULL,
+    time_taken_seconds INTEGER,
+    wrong_answers JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);

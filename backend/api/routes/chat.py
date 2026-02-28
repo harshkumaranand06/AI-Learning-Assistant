@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from models.schemas import ChatRequest
+from pydantic import BaseModel
+from typing import Optional
 from services.supabase_client import supabase_client
 from services.gemini_client import get_embedding
-from services.groq_client import groq_client, GROQ_MODEL
+from services.groq_client import groq_client, GROQ_MODEL_FAST
 import json
 
 router = APIRouter()
@@ -21,11 +23,19 @@ async def chat_stream(req: ChatRequest):
         query_embedding = await get_embedding(user_query)
         
         # 2. Similarity search via RPC function
-        rpc_res = supabase_client.rpc(
-            "match_document_chunks", 
-            {"query_embedding": query_embedding, "match_count": 5}
-        ).execute()
-        
+        if req.document_id:
+            # Single document search
+            rpc_res = supabase_client.rpc(
+                "match_document_chunks", 
+                {"query_embedding": query_embedding, "match_count": 5, "doc_id": req.document_id}
+            ).execute()
+        else:
+            # Global library search
+            rpc_res = supabase_client.rpc(
+                "match_document_chunks_global", 
+                {"query_embedding": query_embedding, "match_count": 7}
+            ).execute()
+            
         similar_chunks = rpc_res.data or []
         context_text = "\n\n".join([chunk["content"] for chunk in similar_chunks]) if similar_chunks else "No relevant context found."
         
@@ -54,7 +64,7 @@ async def chat_stream(req: ChatRequest):
         async def event_generator():
             try:
                 stream = await groq_client.chat.completions.create(
-                    model=GROQ_MODEL,
+                    model=GROQ_MODEL_FAST,
                     messages=history,
                     stream=True,
                 )
@@ -73,3 +83,40 @@ async def chat_stream(req: ChatRequest):
     except Exception as e:
         import traceback
         raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
+
+class ChatSaveRequest(BaseModel):
+    session_id: str
+    document_id: Optional[str] = None
+    role: str
+    content: str
+
+@router.post("/save")
+async def save_chat_message(req: ChatSaveRequest):
+    """Save a single message to the chat history table."""
+    try:
+        data = {
+            "session_id": req.session_id,
+            "role": req.role,
+            "content": req.content,
+        }
+        if req.document_id:
+            data["document_id"] = req.document_id
+            
+        res = supabase_client.table("chat_history").insert(data).execute()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/history/{session_id}")
+async def get_chat_history(session_id: str):
+    """Fetch chat history for a session."""
+    try:
+        res = supabase_client.table("chat_history") \
+            .select("*") \
+            .eq("session_id", session_id) \
+            .order("created_at", desc=False) \
+            .execute()
+            
+        return {"messages": res.data or []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
