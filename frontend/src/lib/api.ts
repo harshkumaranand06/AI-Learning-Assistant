@@ -1,4 +1,4 @@
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://ai-learning-assistant-47cl.onrender.com";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://ai-learning-assistant-1-6xxx.onrender.com";
 
 export async function uploadYouTube(url: string) {
   const target = `${API_BASE_URL}/api/upload/youtube`;
