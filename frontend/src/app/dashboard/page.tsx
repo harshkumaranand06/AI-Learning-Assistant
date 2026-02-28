@@ -111,7 +111,7 @@ export default function DashboardPage() {
                                     <Tooltip
                                         contentStyle={{ backgroundColor: "#1e1b4b", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 12, color: "#fff" }}
                                         labelFormatter={(val) => new Date(val).toLocaleString()}
-                                        formatter={(val: number) => [`${val}%`, "Score"]}
+                                        formatter={(val: any) => [`${val}%`, "Score"]}
                                     />
                                     <Area type="monotone" dataKey="percentage" stroke="#818cf8" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
                                 </AreaChart>
