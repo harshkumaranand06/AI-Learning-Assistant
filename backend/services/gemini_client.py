@@ -17,6 +17,7 @@ async def get_embedding(text: str) -> list[float]:
     result = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
+        config=types.EmbedContentConfig(output_dimensionality=768)
     )
     return result.embeddings[0].values
 

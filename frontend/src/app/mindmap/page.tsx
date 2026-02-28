@@ -4,7 +4,7 @@ import {
     ReactFlow, Background, Controls, MiniMap,
     applyNodeChanges, applyEdgeChanges,
     NodeChange, EdgeChange, Node, Edge, Panel, ReactFlowProvider, useReactFlow,
-    Position
+    Position, Handle
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { generateMindMap, explainTopic } from "@/lib/api";
@@ -13,14 +13,15 @@ import { toPng } from 'html-to-image';
 import { useRouter } from 'next/navigation';
 
 // Custom Node
-function MindMapNode({ data }: { data: any }) {
+function MindMapNode({ data, targetPosition, sourcePosition }: any) {
     return (
-        <div style={{
-            background: "rgba(20, 15, 35, 0.85)",
+        <div className="mindmap-node transition-transform hover:scale-105 hover:shadow-[0_0_20px_rgba(139,92,246,0.5)]" style={{
+            background: "linear-gradient(135deg, rgba(30, 20, 50, 0.9), rgba(20, 15, 35, 0.95))",
             backdropFilter: "blur(12px)",
-            border: "1px solid rgba(139, 92, 246, 0.3)",
+            border: "1px solid rgba(139, 92, 246, 0.4)",
+            borderLeft: "4px solid #8b5cf6",
             padding: "16px 24px",
-            borderRadius: "16px",
+            borderRadius: "12px",
             color: "white",
             fontWeight: "600",
             fontSize: "15px",
@@ -30,9 +31,11 @@ function MindMapNode({ data }: { data: any }) {
             textAlign: "center",
             wordWrap: "break-word",
             cursor: "pointer",
-            transition: "all 0.2s ease"
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)"
         }}>
+            <Handle type="target" position={targetPosition || Position.Left} style={{ background: '#a78bfa', width: '8px', height: '8px', border: 'none' }} />
             {data.label}
+            <Handle type="source" position={sourcePosition || Position.Right} style={{ background: '#a78bfa', width: '8px', height: '8px', border: 'none' }} />
         </div>
     );
 }
@@ -126,10 +129,12 @@ function MindMapComponent() {
             const styledEdges = result.edges.map((e: any) => ({
                 ...e,
                 animated: true,
-                style: { stroke: '#8b5cf6', strokeWidth: 3, opacity: 0.8 }
+                style: { stroke: '#a78bfa', strokeWidth: 2, opacity: 0.9 },
+                type: 'smoothstep' // Gives it that rigid tree look instead of straight lines
             }));
 
-            const layouted = getLayoutedElements(styledNodes, styledEdges, 'TB');
+            // Changed to LR (Left-to-Right) for a more tree-like appearance
+            const layouted = getLayoutedElements(styledNodes, styledEdges, 'LR');
             setNodes(layouted.nodes);
             setEdges(layouted.edges);
 

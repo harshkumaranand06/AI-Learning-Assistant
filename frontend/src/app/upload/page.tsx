@@ -82,7 +82,7 @@ export default function UploadPage() {
                                 style={inputStyle}
                                 disabled={loading}
                             />
-                            <button disabled={loading} style={{ ...submitBtn, background: "linear-gradient(135deg, #ef4444, #b91c1c)", boxShadow: loading ? "none" : "0 8px 30px rgba(239,68,68,0.4)" }}>
+                            <button disabled={loading} suppressHydrationWarning style={{ ...submitBtn, background: "linear-gradient(135deg, #ef4444, #b91c1c)", boxShadow: loading ? "none" : "0 8px 30px rgba(239,68,68,0.4)" }}>
                                 {loading ? <div style={spinnerStyle} /> : "Extract YouTube"}
                             </button>
                         </form>
@@ -107,7 +107,7 @@ export default function UploadPage() {
                                 style={{ ...inputStyle, padding: "12px", cursor: "pointer" }}
                                 disabled={loading}
                             />
-                            <button disabled={loading} style={{ ...submitBtn, background: "linear-gradient(135deg, #3b82f6, #1d4ed8)", boxShadow: loading ? "none" : "0 8px 30px rgba(59,130,246,0.4)" }}>
+                            <button disabled={loading} suppressHydrationWarning style={{ ...submitBtn, background: "linear-gradient(135deg, #3b82f6, #1d4ed8)", boxShadow: loading ? "none" : "0 8px 30px rgba(59,130,246,0.4)" }}>
                                 {loading ? <div style={spinnerStyle} /> : "Extract PDF"}
                             </button>
                         </form>
